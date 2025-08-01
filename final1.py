@@ -1,7 +1,12 @@
+
+
+
+
+
+
 import streamlit as st
 import xmlrpc.client
 import re
-from collections import Counter
 
 # CATEGORIES & ASSIGNEES (these don't change!)
 PROJECT_MANAGER = "Sadeesh"
@@ -40,100 +45,76 @@ def odoo_connect():
     return uid, models
 
 def get_user_id_by_login(login):
-    if not login: return None
+    if not login:
+        return None
     uid, models = odoo_connect()
     user_ids = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'res.users', 'search', [[['login', '=', login]]]
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'res.users', 'search', [[['login', '=', login]]]
     )
     return user_ids[0] if user_ids else None
 
 def get_stage_id(stage_name):
     uid, models = odoo_connect()
     stage_ids = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'project.project.stage', 'search', [[['name', '=', stage_name]]]
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'project.project.stage', 'search', [[['name', '=', stage_name]]]
     )
     return stage_ids[0] if stage_ids else None
 
 def get_or_create_tag(tag_name, color=1):
     uid, models = odoo_connect()
-    tag_name_cleaned = tag_name.replace(",", "").strip()
+    tag_clean = tag_name.replace(",", "").strip()
     tag_ids = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'project.tags', 'search', [[['name', '=', tag_name_cleaned]]]
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'project.tags', 'search', [[['name', '=', tag_clean]]]
     )
     if tag_ids:
         return tag_ids[0]
-    tag_vals = {'name': tag_name_cleaned, 'color': color}
-    tag_id = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'project.tags', 'create', [tag_vals]
+    tag_vals = {'name': tag_clean, 'color': color}
+    return models.execute_kw(
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'project.tags', 'create', [tag_vals]
     )
-    return tag_id
 
 def text_to_html(text):
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'([📋🔧✅🎯🏅])\s*<b>([^<]+)</b>', r'<h4>\1 \2</h4>', text)
     text = re.sub(r'([📋🔧✅🎯🏅])\s*([A-Z ]+)', r'<h4>\1 \2</h4>', text)
-    text = text.replace('\n', '<br>')
-    return text
+    return text.replace('\n', '<br>')
 
-def create_project(project_name, category, description_html):
+def create_project(name, stage, desc_html):
     uid, models = odoo_connect()
-    stage_id = get_stage_id(category)
-    project_vals = {'name': project_name, 'active': True, 'description': description_html}
+    stage_id = get_stage_id(stage)
+    vals = {'name': name, 'active': True, 'description': desc_html}
     if stage_id:
-        project_vals['stage_id'] = stage_id
-    project_id = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'project.project', 'create', [project_vals]
+        vals['stage_id'] = stage_id
+    return models.execute_kw(
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'project.project', 'create', [vals]
     )
-    return project_id
 
-def create_task(project_id, task_title, task_desc, tag_names, assignee_login=None, parent_id=None):
+def create_task(proj_id, title, desc, tags, assignee_login=None, parent_id=None):
     uid, models = odoo_connect()
-    tag_ids = []
-    for tag in tag_names:
-        if tag.strip():
-            tag_id = get_or_create_tag(tag.strip())
-            tag_ids.append(tag_id)
-    desc_html = text_to_html(task_desc) if task_desc else ""
-    task_vals = {
-        "name": task_title,
-        "project_id": project_id,
-        "description": desc_html,
+    tag_ids = [get_or_create_tag(t) for t in tags if t]
+    vals = {
+        "name": title,
+        "project_id": proj_id,
+        "description": text_to_html(desc) if desc else "",
         "tag_ids": [(6, 0, tag_ids)] if tag_ids else []
     }
     if parent_id:
-        task_vals["parent_id"] = parent_id
+        vals["parent_id"] = parent_id
     if assignee_login:
-        assignee_user_id = get_user_id_by_login(assignee_login)
-        if assignee_user_id:
-            task_vals['user_ids'] = [(6, 0, [assignee_user_id])]
+        uid_user = get_user_id_by_login(assignee_login)
+        if uid_user:
+            vals["user_ids"] = [(6, 0, [uid_user])]
         else:
-            st.warning(f"Assignee with login '{assignee_login}' not found in Odoo! This task will be unassigned.")
-    task_id = models.execute_kw(
-        ODOO_DB, uid, st.session_state["odoo_pass"], 'project.task', 'create', [task_vals]
+            st.warning(f"Assignee '{assignee_login}' not found; task will be unassigned.")
+    return models.execute_kw(
+        ODOO_DB, uid, st.session_state["odoo_pass"],
+        'project.task', 'create', [vals]
     )
-    return task_id
-
-def extract_subtasks_from_description(description):
-    lines = description.splitlines()
-    subtasks = []
-    section_pattern = re.compile(r'\b(subgoals?|sub-tasks?|subtasks?|tasks?)\b', re.IGNORECASE)
-    in_section = False
-    for line in lines:
-        if section_pattern.search(line):
-            in_section = True
-            continue
-        if in_section:
-            bullet_match = re.match(r'^[-*•]\s+(.*)', line)
-            num_match = re.match(r'^\d+\.\s+(.*)', line)
-            if bullet_match:
-                subtasks.append(bullet_match.group(1).strip())
-            elif num_match:
-                subtasks.append(num_match.group(1).strip())
-            elif line.strip() == '' or line.startswith('#') or line.startswith('>'):
-                continue
-            else:
-                break
-    return subtasks
 
 # --- Streamlit UI ---
 st.title("🚀 SBA Sprint Planning Assistant")
@@ -141,134 +122,93 @@ st.title("🚀 SBA Sprint Planning Assistant")
 with st.container():
     st.markdown('<h3 class="section-header">🚀 Create a New Project</h3>', unsafe_allow_html=True)
     with st.expander("Project Details", expanded=True):
-        project_name = st.text_input("Project Name", value="User centric use case")
-        project_category = st.selectbox("Project Kanban Column", CATEGORY_OPTIONS)
-        project_desc = st.text_area(
+        proj_name = st.text_input("Project Name", "User centric use case")
+        proj_stage = st.selectbox("Project Kanban Column", CATEGORY_OPTIONS)
+        proj_desc = st.text_area(
             "Project Description (Structured content supported)",
             height=350,
-            value="""📋 **USER STORY:**
-As a Business Analyst (BA) at SBA, I want to understand how our internal automation tools can be adapted for new workflows...
-
-🔧 **SYSTEM STORY:**
-As an engineer, I need to produce a technical design...
-
-✅ **ACCEPTANCE CRITERIA:**
-A formal design document is delivered on time...
-
-🎯 **SUBGOALS / TASKS:**
-- Analyze the script...
-- Research CP4BA capabilities...
-"""
+            value="""📋 **USER STORY:**...
+🔧 **SYSTEM STORY:**...
+✅ **ACCEPTANCE CRITERIA:**...
+🎯 **SUBGOALS / TASKS:**..."""
         )
-        if st.button("🆕 Create Project", key="create_project_btn"):
-            description_html = text_to_html(project_desc)
-            project_id = create_project(project_name, project_category, description_html)
-            st.session_state['project_id'] = project_id
-            st.session_state['project_name'] = project_name
-            st.session_state['project_category'] = project_category
-            st.session_state['structured_desc'] = project_desc
-            st.success(f"✅ Project '{project_name}' created in '{project_category}' column.")
+        if st.button("🆕 Create Project"):
+            html = text_to_html(proj_desc)
+            pid = create_project(proj_name, proj_stage, html)
+            st.session_state.update({
+                'project_id': pid,
+                'project_name': proj_name
+            })
+            st.success(f"✅ Project '{proj_name}' created.")
 
 if 'project_id' in st.session_state:
     st.markdown(f'<h3 class="section-header">🗂️ Add Tasks to Project: {st.session_state["project_name"]}</h3>', unsafe_allow_html=True)
     st.markdown(f"**Project Manager:** {PROJECT_MANAGER}")
 
-    with st.form("add_task_form"):
-        task_title = st.text_input("Task Title", key="task_title_input")
-        task_desc = st.text_area("Task Description (Optional, supports Markdown-like headings)", key="task_desc_input")
-
-        # Manual-only tags: user types comma-separated tags
-        manual_tags_input = st.text_input(
-            "Tags for Task (comma-separated)", 
-            value="", 
-            help="Enter tags manually, separated by commas."
-        )
-        tags = [t.strip() for t in manual_tags_input.split(",") if t.strip()]
-
-        selected_display_name = st.selectbox("Assign Task To (required)", list(ASSIGNEES.keys()), index=0)
-        assignee_login = ASSIGNEES[selected_display_name]
-
-        extracted_subtasks = extract_subtasks_from_description(task_desc)
-        st.write("**Suggested Subtasks (select to add):**")
-        selected_subtasks = st.multiselect(
-            "Pick subtasks", options=extracted_subtasks, default=extracted_subtasks, key="selected_subtasks"
-        )
-        st.write("_Or add additional subtasks manually (one per line):_")
-        manual_subtasks_text = st.text_area("Manual Subtasks", key="manual_subtasks_text")
-
+    with st.form("task_form"):
+        title = st.text_input("Task Title")
+        desc = st.text_area("Task Description (Optional)")
+        tags_input = st.text_input("Tags (comma-separated)")
+        tags = [t.strip() for t in tags_input.split(",") if t.strip()]
+        assignee = st.selectbox("Assign Task To", list(ASSIGNEES.keys()))
+        assignee_login = ASSIGNEES[assignee]
+        additional_subtasks = st.text_area("Add Subtasks Manually (one per line)")
         submitted = st.form_submit_button("➕ Add Task")
 
         if submitted:
-            if not task_title.strip():
+            if not title:
                 st.warning("⚠️ Please enter a task title.")
             else:
-                new_task_id = create_task(
+                task_id = create_task(
                     st.session_state['project_id'],
-                    task_title.strip(),
-                    task_desc.strip(),
-                    tags,
-                    assignee_login
+                    title, desc, tags, assignee_login
                 )
-                display_assignee = selected_display_name
-                st.success(f"✅ Task '{task_title}' assigned to '{display_assignee}'. (Odoo Task ID: {new_task_id})")
-                subtask_count = 0
-                for subtask in selected_subtasks:
-                    create_task(st.session_state['project_id'], subtask.strip(), "", [], None, parent_id=new_task_id)
-                    subtask_count += 1
-                for manual_subtask in [l.strip() for l in manual_subtasks_text.splitlines() if l.strip()]:
-                    create_task(st.session_state['project_id'], manual_subtask, "", [], None, parent_id=new_task_id)
-                    subtask_count += 1
-                if subtask_count:
-                    st.success(f"🪄 {subtask_count} subtasks created and linked to this task.")
+                st.success(f"✅ Task '{title}' created (ID: {task_id}).")
+                count = 0
+                for line in additional_subtasks.splitlines():
+                    sub = line.strip()
+                    if sub:
+                        create_task(st.session_state['project_id'], sub, "", [], None, parent_id=task_id)
+                        count += 1
+                if count:
+                    st.success(f"🪄 {count} subtasks created.")
                 st.rerun()
 
     st.markdown("### 📝 Current Tasks")
     uid, models = odoo_connect()
-    task_objs = models.execute_kw(
+    tasks = models.execute_kw(
         ODOO_DB, uid, st.session_state["odoo_pass"],
         'project.task', 'search_read',
         [[['project_id', '=', st.session_state['project_id']]]],
-        {'fields': ['id', 'name', 'description', 'tag_ids', 'user_ids', 'parent_id']}
+        {'fields': ['id','name','tag_ids','user_ids','parent_id']}
     )
-
-    if not task_objs:
+    if not tasks:
         st.info("ℹ️ No tasks yet.")
     else:
-        for task in task_objs:
-            if task.get('parent_id'):
-                continue
-            # Fetch tag names
-            tags = models.execute_kw(ODOO_DB, uid, st.session_state["odoo_pass"],
-                                     'project.tags', 'read', [task.get('tag_ids', [])], {'fields': ['name']}) \
-                   if task.get('tag_ids') else []
-            tag_names = ", ".join([tag['name'] for tag in tags]) if tags else "-"
-            users = models.execute_kw(ODOO_DB, uid, st.session_state["odoo_pass"],
-                                      'res.users', 'read', [task.get('user_ids', [])], {'fields': ['name']}) \
-                    if task.get('user_ids') else []
-            assignee_names = ", ".join([user['name'] for user in users]) if users else "Unassigned"
-
+        for t in tasks:
+            if t.get('parent_id'): continue
+            tag_objs = models.execute_kw(ODOO_DB, uid, st.session_state["odoo_pass"],
+                                         'project.tags','read',[t['tag_ids']],{'fields':['name']}) if t['tag_ids'] else []
+            tag_names = ", ".join([o['name'] for o in tag_objs]) or "-"
+            user_objs = models.execute_kw(ODOO_DB, uid, st.session_state["odoo_pass"],
+                                          'res.users','read',[t['user_ids']],{'fields':['name']}) if t['user_ids'] else []
+            assignees = ", ".join([u['name'] for u in user_objs]) or "Unassigned"
             st.markdown(
-                f"""<div class="task-card">
-                    <strong style="font-size:1.15rem;">{task['name']}</strong><br>
-                    <small style="color: #555;">Tags: {tag_names}</small><br>
-                    <small style="color: #555;">Assignee: {assignee_names}</small>
-                </div>""", unsafe_allow_html=True)
-
-            children = [t for t in task_objs if t.get("parent_id") and t["parent_id"][0] == task["id"]]
-            for sub in children:
+                f"<div class='task-card'><strong>{t['name']}</strong><br>"
+                f"<small>Tags: {tag_names}</small><br>"
+                f"<small>Assignee: {assignees}</small></div>",
+                unsafe_allow_html=True
+            )
+            for sub in [x for x in tasks if x.get('parent_id') and x['parent_id'][0]==t['id']]:
                 st.markdown(
-                    f"""<div class="task-card" style="margin-left:30px;background:#eaf9fd;">
-                    <strong>Subtask: {sub['name']}</strong>
-                    </div>""", unsafe_allow_html=True)
+                    f"<div class='task-card' style='margin-left:30px;background:#eaf9fd;'>"
+                    f"<strong>Subtask: {sub['name']}</strong></div>",
+                    unsafe_allow_html=True
+                )
 
-    col1, col2 = st.columns([1, 4])
-    if col2.button("🔄 Start a New Project", key="reset_project_btn"):
-        keys_to_delete = [
-            'project_id', 'project_name', 'project_category', 'structured_desc',
-            'task_title_input', 'task_desc_input', 'manual_tags_input',
-            'selected_subtasks', 'manual_subtasks_text'
-        ]
-        for key in keys_to_delete:
+    col1, col2 = st.columns([1,4])
+    if col2.button("🔄 Start a New Project"):
+        for key in ['project_id','project_name']:
             st.session_state.pop(key, None)
         st.rerun()
 else:
