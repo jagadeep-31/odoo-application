@@ -1,7 +1,5 @@
 
 
-
-
 import streamlit as st
 import xmlrpc.client
 import re
@@ -15,7 +13,7 @@ ASSIGNEES = {
     "Sri Hari": "srihari.k@sbainfo.in",
     "Hari": "hari.r@sbainfo.in",
     "Ajith Kumar": "ajithkumar.r@sbainfo.in",
-    "Nithiyanandham": "nithiyanandham@sbainfo.in"
+    "Nithiyanandham": "nithiyanandham.r@sbainfo.in"
 }
 ODOO_URL = "https://sba-info-solutions-pvt-ltd.odoo.com"
 ODOO_DB = "sba-info-solutions-pvt-ltd"
@@ -313,5 +311,4 @@ if 'project_id' in st.session_state:
         st.rerun()
 else:
     st.info("ℹ️ Create a project above to add tasks.")
-
 
