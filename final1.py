@@ -10,7 +10,7 @@ ASSIGNEES = {
     "Jagadeep": "jagadeep.k@sbainfo.in",
     "Sri Hari": "srihari.k@sbainfo.in",
     "Hari": "hari.r@sbainfo.in",
-    "Ajith Kumar": "ajith.kumar.r@sbainfo.in",
+    "Ajith Kumar": "ajith kumar.r@sbainfo.in",
     "Nithiyanandham": "nithiyanandham@sbainfo.in"
 }
 ODOO_URL = "https://sba-info-solutions-pvt-ltd.odoo.com"
