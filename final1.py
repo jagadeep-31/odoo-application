@@ -9,12 +9,13 @@ import spacy
 import sys
 import subprocess
 
+
+MODEL = "en_core_web_sm"
 try:
-    nlp = spacy.load("en_core_web_sm")
-except OSError:
-    # Model is missing, download it at runtime:
-    subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.load(MODEL)
+except Exception:
+    subprocess.run([sys.executable, "-m", "spacy", "download", MODEL])
+    nlp = spacy.load(MODEL)
 
 
 # ================================ Your original constants and code ================================
