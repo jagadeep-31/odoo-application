@@ -5,15 +5,17 @@ from collections import Counter
 import spacy
 import sys
 import subprocess
+import spacy
+import sys
+import subprocess
 
-# ========================================
-# Load spaCy English model once with runtime download fallback
-# ========================================
 try:
     nlp = spacy.load("en_core_web_sm")
 except OSError:
+    # Model is missing, download it at runtime:
     subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
     nlp = spacy.load("en_core_web_sm")
+
 
 # ================================ Your original constants and code ================================
 PROJECT_MANAGER = "Sadeesh"
